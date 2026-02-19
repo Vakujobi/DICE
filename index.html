@@ -212,7 +212,7 @@
   <div id="modalBackdrop" role="dialog" aria-modal="true">
     <div id="modal">
       <div id="modalTop">
-        <div id="modalTitle">Your Dice Moment ✨</div>
+        <div id="modalTitle">What is this number telling you?</div>
         <button id="closeModal">Close</button>
       </div>
       <div id="modalBig">—</div>
@@ -298,7 +298,6 @@
     soundToggle.addEventListener("click", async () => {
       soundOn = !soundOn;
       soundToggle.classList.toggle("on", soundOn);
-
       if (soundOn) {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if (audioCtx.state !== "running") await audioCtx.resume();
@@ -319,34 +318,29 @@
       return g;
     }
 
-    // Popup ding (pleasant)
     function playDing(){
       if (!audioCtx || !soundOn) return;
       const t = audioCtx.currentTime;
-
-      const notes = [880, 1175]; // two-note sparkle
+      const notes = [880, 1175];
       notes.forEach((freq, i) => {
         const osc = audioCtx.createOscillator();
         osc.type = "sine";
         osc.frequency.setValueAtTime(freq, t + i*0.03);
-
         const g = gainNode(0.0001);
         g.gain.setValueAtTime(0.0001, t + i*0.03);
         g.gain.exponentialRampToValueAtTime(0.18, t + i*0.03 + 0.01);
         g.gain.exponentialRampToValueAtTime(0.0001, t + i*0.03 + 0.25);
-
         osc.connect(g);
         osc.start(t + i*0.03);
         osc.stop(t + i*0.03 + 0.28);
       });
     }
 
-    // NEW roll sound: rumble + clacks (less electronic, more like real dice)
+    // roll sound: rumble + clacks
     function playRollSequence(){
       if (!audioCtx || !soundOn) return;
       const t0 = audioCtx.currentTime;
 
-      // rumble layer (bandpassed noise)
       const dur = 0.55;
       const buffer = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * dur), audioCtx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -373,7 +367,6 @@
       rumble.start(t0);
       rumble.stop(t0 + dur + 0.02);
 
-      // clacks: small taps + tiny noise bursts
       const clacks = [0.06, 0.14, 0.23, 0.33, 0.45, 0.58];
       clacks.forEach((dt, idx) => {
         const vol = 0.22 - idx*0.02;
@@ -420,7 +413,7 @@
     // ---------- THREE ----------
     const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); // mobile-friendly
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
@@ -429,10 +422,18 @@
     scene.fog = new THREE.Fog(0xf7f4ff, 10, 26);
 
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 100);
-    camera.position.set(7.0, 5.2, 7.6);
-    camera.lookAt(0, 1.0, 0);
 
-    // Pastel studio lights
+    function fitCamera(){
+      const portrait = window.innerHeight > window.innerWidth;
+      if (portrait){
+        camera.position.set(7.6, 6.1, 8.6);
+      } else {
+        camera.position.set(7.0, 5.2, 7.6);
+      }
+      camera.lookAt(0, 1.0, 0);
+    }
+    fitCamera();
+
     scene.add(new THREE.HemisphereLight(0xfff7f0, 0xdfeaff, 0.75));
 
     const key = new THREE.DirectionalLight(0xffffff, 0.95);
@@ -453,7 +454,6 @@
     rim.position.set(0, 6, -8);
     scene.add(rim);
 
-    // Pastel cyclorama
     const floorMat = new THREE.MeshPhysicalMaterial({
       color: 0xf3f0ff,
       roughness: 0.92,
@@ -555,9 +555,6 @@
         clearcoat: 0.85,
         clearcoatRoughness: 0.22
       });
-
-      // Box order: [right, left, top, bottom, front, back]
-      // Assign: front=1, back=6, top=2, bottom=5, right=3, left=4
       return [
         mk(faceTex[3]), // right
         mk(faceTex[4]), // left
@@ -584,20 +581,19 @@
       return mesh;
     }
 
-    const diceMeshA = makeDiceMesh(0xf6f1ff); // lilac-white
-    const diceMeshB = makeDiceMesh(0xf1fff6); // mint-white
+    const diceMeshA = makeDiceMesh(0xf6f1ff);
+    const diceMeshB = makeDiceMesh(0xf1fff6);
 
     // ---------- CANNON ----------
     const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
 
     const diceMat = new CANNON.Material("dice");
     const floorMatP = new CANNON.Material("floor");
+
     world.addContactMaterial(new CANNON.ContactMaterial(diceMat, floorMatP, {
       friction: 0.30,
       restitution: 0.45
     }));
-
-    // Dice-vs-dice contact (so they collide nicely)
     world.addContactMaterial(new CANNON.ContactMaterial(diceMat, diceMat, {
       friction: 0.28,
       restitution: 0.38
@@ -607,13 +603,29 @@
     floorBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
     world.addBody(floorBody);
 
+    // ✅ Invisible tray walls to stop dice flying off-screen
+    function addWall({ x=0, z=0, hx=6, hz=0.15, height=0.9 }){
+      const wall = new CANNON.Body({ type: CANNON.Body.STATIC, material: floorMatP });
+      wall.addShape(new CANNON.Box(new CANNON.Vec3(hx, height/2, hz)));
+      wall.position.set(x, height/2, z);
+      world.addBody(wall);
+      return wall;
+    }
+
+    // Tray dimensions (tuned for mobile)
+    const TRAY_HALF = 3.6;
+    addWall({ x: 0, z:  TRAY_HALF, hx: TRAY_HALF, hz: 0.18, height: 1.0 }); // far
+    addWall({ x: 0, z: -TRAY_HALF, hx: TRAY_HALF, hz: 0.18, height: 1.0 }); // near
+    addWall({ x:  TRAY_HALF, z: 0, hx: 0.18, hz: TRAY_HALF, height: 1.0 }); // right
+    addWall({ x: -TRAY_HALF, z: 0, hx: 0.18, hz: TRAY_HALF, height: 1.0 }); // left
+
     function makeDiceBody(){
       const body = new CANNON.Body({
         mass: 1.1,
         shape: new CANNON.Box(new CANNON.Vec3(diceSize/2, diceSize/2, diceSize/2)),
         material: diceMat,
-        linearDamping: 0.22,
-        angularDamping: 0.22,
+        linearDamping: 0.26,     // slightly more damping = less skating
+        angularDamping: 0.26,
         allowSleep: true,
         sleepTimeLimit: 0.25,
         sleepSpeedLimit: 0.22
@@ -625,7 +637,6 @@
     const diceBodyA = makeDiceBody();
     const diceBodyB = makeDiceBody();
 
-    // Tip pose
     const TIP_X = THREE.MathUtils.degToRad(54.7356);
     const TIP_Y = THREE.MathUtils.degToRad(45);
 
@@ -663,7 +674,6 @@
       return candidates[0].face;
     }
 
-    // Roll logic
     let rolling = false;
     let settleTimer = null;
     let asleepA = false, asleepB = false;
@@ -692,7 +702,6 @@
 
     async function rollTwo(){
       if (rolling) return;
-
       await ensureAudio();
 
       rolling = true;
@@ -706,7 +715,11 @@
 
       playRollSequence();
 
-      // reset positions (a bit wider so they collide in the middle)
+      // reduce power on small screens
+      const portrait = window.innerHeight > window.innerWidth;
+      const impulseScale = portrait ? 0.75 : 1.0;
+      const angScale = portrait ? 0.85 : 1.0;
+
       diceBodyA.position.set(-1.45 + (Math.random()-0.5)*0.25, 3.1, (Math.random()-0.5)*0.25);
       diceBodyB.position.set( 1.45 + (Math.random()-0.5)*0.25, 3.1, (Math.random()-0.5)*0.25);
 
@@ -726,17 +739,15 @@
 
       diceBodyA.wakeUp(); diceBodyB.wakeUp();
 
-      // impulses toward center a bit (so they meet)
-      const impA = new CANNON.Vec3( 1.4 + Math.random()*1.8, 0, (Math.random()*2-1)*2.6);
-      const impB = new CANNON.Vec3(-1.4 - Math.random()*1.8, 0, (Math.random()*2-1)*2.6);
+      const impA = new CANNON.Vec3((1.4 + Math.random()*1.8) * impulseScale, 0, ((Math.random()*2-1)*2.6) * impulseScale);
+      const impB = new CANNON.Vec3((-1.4 - Math.random()*1.8) * impulseScale, 0, ((Math.random()*2-1)*2.6) * impulseScale);
 
       diceBodyA.applyImpulse(impA, diceBodyA.position);
       diceBodyB.applyImpulse(impB, diceBodyB.position);
 
-      diceBodyA.angularVelocity.set((Math.random()*2-1)*12, (Math.random()*2-1)*14, (Math.random()*2-1)*12);
-      diceBodyB.angularVelocity.set((Math.random()*2-1)*12, (Math.random()*2-1)*14, (Math.random()*2-1)*12);
+      diceBodyA.angularVelocity.set((Math.random()*2-1)*12*angScale, (Math.random()*2-1)*14*angScale, (Math.random()*2-1)*12*angScale);
+      diceBodyB.angularVelocity.set((Math.random()*2-1)*12*angScale, (Math.random()*2-1)*14*angScale, (Math.random()*2-1)*12*angScale);
 
-      // fallback if never sleeps
       settleTimer = setTimeout(() => {
         diceBodyA.velocity.scale(0.35, diceBodyA.velocity);
         diceBodyA.angularVelocity.scale(0.35, diceBodyA.angularVelocity);
@@ -752,27 +763,24 @@
 
     rollBtn.addEventListener("click", rollTwo);
 
-    // Also allow tapping anywhere to roll (mobile-friendly), but not on modal
+    // tap anywhere to roll (except UI/modal)
     window.addEventListener("pointerdown", (e) => {
       if (modalBackdrop.style.display === "flex") return;
-      // don't trigger when touching UI controls
       if (e.target.closest && (e.target.closest("#btnRow") || e.target.closest("#soundWrap"))) return;
       rollTwo();
     }, { passive: true });
+
+    // also resume audio on mobile gestures
+    soundToggle.addEventListener("pointerdown", ensureAudio, { passive: true });
 
     window.addEventListener("keydown", (e)=>{
       if (e.code === "Space"){ e.preventDefault(); rollTwo(); }
       if (e.code === "KeyR"){ setTipPoseTwo(); }
     });
 
-    // Sound toggle also resumes audio on mobile
-    soundToggle.addEventListener("pointerdown", ensureAudio, { passive: true });
-
-    // ---------- Animate ----------
     const clock = new THREE.Clock();
     function animate(){
       requestAnimationFrame(animate);
-
       const dt = Math.min(clock.getDelta(), 1/30);
       world.step(1/60, dt, 3);
 
@@ -790,6 +798,7 @@
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
+      fitCamera();
     });
   </script>
 </body>
